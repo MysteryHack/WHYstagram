@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHYstagram</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main>
+        <section>
+            <div class="outer-border">
+                <h1 class="inner-border" style="padding: 5px 50px;">WHYstagram</h1>
+            </div>
+            <div class="form">
+                <label>Your awesome photo</label>
+                <input type=file name="photo" id="photo"></label>
+                <label>Caption</label>
+                <input type="text" name="caption" id="caption" placeholder="Look at that power generator!"></label>
+                <input type="hidden" id="crappy_cam" name="crappy_cam" value=0 />
+                <input type="submit" id="submit" value="Send">
+            </div>
+        </section>
+        <section id="gallery">
+            
+        </section>
+    </main>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            loadGallery();
+        });
+
+        function loadGallery() {
+            const gallery = document.getElementById("gallery");
+            gallery.innerHTML = ""; // clear old content
+
+            fetch('./uploads/metadata.json')
+                .then(response => response.json())
+                .then(data => {
+                    // Sort newest first
+                    data.sort((a, b) => b.timestamp - a.timestamp);
+
+                    data.forEach(item => {
+                        const container = document.createElement("div");
+                        container.className = "instant-photo";
+
+                        const img = document.createElement("img");
+                        img.src = `uploads/${item.file}`;
+                        container.appendChild(img);
+
+                        const caption = document.createElement("h2");
+                        caption.className = "caption";
+                        caption.textContent = item.caption || "";
+                        container.appendChild(caption);
+
+                        gallery.appendChild(container);
+                    });
+                })
+                .catch(err => console.error("Failed to load gallery metadata:", err));
+        }
+
+        document.querySelector("#submit").onclick = function (e) {
+            e.preventDefault();
+
+            const file = document.getElementById("photo").files[0];
+            const caption = document.getElementById("caption").value;
+            const crappyFlag = document.getElementById("crappy_cam").value;
+
+            if (!file) {
+                alert("Please select a photo");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("photo", file);
+            formData.append("caption", caption);
+            formData.append("crappy_cam", crappyFlag);
+
+            fetch("upload.php", {
+                method: "POST",
+                body: formData
+            })
+            .then(res => res.text())
+            .then(data => {
+                console.log("Server response:", data);
+                document.querySelector("form")?.reset?.(); // reset form if inside <form>
+                document.getElementById("photo").value = "";
+                document.getElementById("caption").value = "";
+                document.getElementById("crappy_cam").value = 0;
+
+                loadGallery(); // reload the gallery
+            })
+            .catch(err => {
+                console.error("Upload failed:", err);
+            });
+        };
+
+        document.getElementById("photo").onchange = function () {
+            const file = this.files[0];
+            getJpegComment(file, function (err, comment) {
+                if (comment != null && comment.includes("Crappy Camp Cam")) {
+                    document.querySelector("#crappy_cam").value = 1;
+                    console.log("Taken with the crappycam!");
+                } else {
+                    document.querySelector("#crappy_cam").value = 0;
+                    console.log("Not taken with the crappycam!");
+                }
+            });
+
+            if (!file) return;
+
+            const img = new Image();
+            img.onload = function () {
+                const c = document.createElement("canvas");
+                const ctx = c.getContext("2d");
+                c.width = img.width;
+                c.height = img.height;
+                ctx.drawImage(img, 0, 0);
+
+                c.toBlob(function (blob) {
+                    const convertedFile = new File([blob], "my_time_at_why2025.jpg", {
+                        type: "image/jpeg",
+                        lastModified: Date.now()
+                    });
+
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(convertedFile);
+                    document.getElementById("photo").files = dataTransfer.files;
+
+                    console.log("Input file replaced with converted JPEG.");
+                }, "image/jpeg", 0.75);
+            };
+
+            img.onerror = function () {
+                console.error("Failed to load image for conversion.");
+            };
+
+            img.src = URL.createObjectURL(file);
+        };
+
+        function getJpegComment(file, callback) {
+            if (!file || file.type !== "image/jpeg") {
+                callback(new Error("Not a JPEG file"), null);
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = new Uint8Array(e.target.result);
+                let offset = 0;
+
+                if (data[offset++] !== 0xFF || data[offset++] !== 0xD8) {
+                    callback(new Error("Invalid JPEG file"), null);
+                    return;
+                }
+
+                while (offset < data.length) {
+                    if (data[offset] !== 0xFF) break;
+                    let marker = data[offset + 1];
+                    offset += 2;
+
+                    let length = (data[offset] << 8) + data[offset + 1];
+                    offset += 2;
+
+                    if (marker === 0xFE) {
+                        const commentBytes = data.slice(offset, offset + length - 2);
+                        const comment = new TextDecoder().decode(commentBytes);
+                        callback(null, comment);
+                        return;
+                    }
+
+                    offset += length - 2;
+                }
+
+                callback(null, null);
+            };
+
+            reader.onerror = function () {
+                callback(new Error("Failed to read file"), null);
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
+
+    
+</body>
+</html>
